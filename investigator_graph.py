@@ -1,6 +1,14 @@
+import json
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, NotRequired
 
-from langchain.messages import AIMessage, HumanMessage, SystemMessage
+from langchain.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -10,6 +18,7 @@ from langgraph.runtime import Runtime
 from investigation_tools import build_tools
 from models import InvestigationResult
 from repository import Repository
+from validation import InvestigationValidationError, validate_result
 
 
 StopReason = Literal["complete", "tool_limit", "time_limit"]
@@ -23,6 +32,13 @@ class InvestigationState(MessagesState):
     tool_calls_used: NotRequired[int]
     result: NotRequired[InvestigationResult]
     stop_reason: NotRequired[StopReason]
+
+
+@dataclass(frozen=True)
+class ObservedEvidence:
+    job_observed: bool
+    expected_report_ids: frozenset[str]
+    valid_evidence_ids: frozenset[str]
 
 
 INVESTIGATOR_PROMPT = """
@@ -150,6 +166,28 @@ def build_finalizer_node(
                 "The finalizer did not return an InvestigationResult."
             )
 
+        observed = extract_observed_evidence(state["messages"])
+        if stop_reason == "complete" and not observed.job_observed:
+            raise InvestigationValidationError(
+                ["job evidence was not retrieved"]
+            )
+
+        validate_result(
+            result=result,
+            job_id=state["job_id"],
+            expected_report_ids=set(observed.expected_report_ids),
+            valid_evidence_ids=set(observed.valid_evidence_ids),
+            require_all_findings=stop_reason == "complete",
+        )
+
+        if stop_reason != "complete" and not result.unresolved_questions:
+            raise InvestigationValidationError(
+                [
+                    "an incomplete investigation must identify unresolved "
+                    "questions"
+                ]
+            )
+
         return {
             "result": result,
             "stop_reason": stop_reason,
@@ -157,6 +195,101 @@ def build_finalizer_node(
         }
 
     return finalize
+
+
+def extract_observed_evidence(
+    messages: list[AnyMessage],
+) -> ObservedEvidence:
+    job_observed = False
+    expected_report_ids: set[str] = set()
+    valid_evidence_ids: set[str] = set()
+
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        if message.status == "error":
+            continue
+
+        payload = _parse_tool_message(message)
+
+        if message.name == "get_job":
+            if payload is None:
+                continue
+            job = _require_mapping(payload, message.name)
+            job_observed = True
+            expected_report_ids.update(
+                value
+                for value in job.get("expected_reports", [])
+                if isinstance(value, str)
+            )
+        elif message.name == "list_reports":
+            valid_evidence_ids.update(
+                _ids_from_records(payload, "report_id", message.name)
+            )
+        elif message.name == "get_delivery_attempts":
+            valid_evidence_ids.update(
+                _ids_from_records(payload, "attempt_id", message.name)
+            )
+        elif message.name == "get_recipient_receipts":
+            valid_evidence_ids.update(
+                _ids_from_records(payload, "receipt_id", message.name)
+            )
+        elif message.name == "get_destination_config":
+            if payload is None:
+                continue
+            config = _require_mapping(payload, message.name)
+            destination_id = config.get("destination_id")
+            if isinstance(destination_id, str):
+                valid_evidence_ids.add(destination_id)
+
+    return ObservedEvidence(
+        job_observed=job_observed,
+        expected_report_ids=frozenset(expected_report_ids),
+        valid_evidence_ids=frozenset(valid_evidence_ids),
+    )
+
+
+def _parse_tool_message(message: ToolMessage) -> Any:
+    if not isinstance(message.content, str):
+        raise RuntimeError(
+            f"Tool {message.name!r} returned unsupported content."
+        )
+
+    try:
+        return json.loads(message.content)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"Tool {message.name!r} returned invalid JSON."
+        ) from error
+
+
+def _require_mapping(
+    payload: Any,
+    tool_name: str | None,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"Tool {tool_name!r} returned an unexpected result shape."
+        )
+    return payload
+
+
+def _ids_from_records(
+    payload: Any,
+    id_field: str,
+    tool_name: str | None,
+) -> set[str]:
+    if not isinstance(payload, list):
+        raise RuntimeError(
+            f"Tool {tool_name!r} returned an unexpected result shape."
+        )
+
+    return {
+        record[id_field]
+        for record in payload
+        if isinstance(record, dict)
+        and isinstance(record.get(id_field), str)
+    }
 
 
 def mark_tool_limit(

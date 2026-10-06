@@ -20,12 +20,14 @@ from investigator_graph import (
     build_investigation_graph,
     build_model_node,
     build_tool_node,
+    extract_observed_evidence,
     mark_tool_limit,
     route_after_model,
 )
 from models import Finding, InvestigationResult, RecommendedAction
 from repository import Repository
 from seed import seed_database
+from validation import InvestigationValidationError
 
 
 @tool
@@ -98,6 +100,28 @@ def investigation_result() -> InvestigationResult:
             )
         ],
     )
+
+
+def observed_job_and_reports() -> list[ToolMessage]:
+    return [
+        ToolMessage(
+            content=(
+                '{"job_id":"job-001","expected_reports":'
+                '["report-A","report-B","report-C"]}'
+            ),
+            tool_call_id="call-get-job",
+            name="get_job",
+        ),
+        ToolMessage(
+            content=(
+                '[{"report_id":"report-A","destination_id":"destination-A"},'
+                '{"report_id":"report-B","destination_id":"destination-B"},'
+                '{"report_id":"report-C","destination_id":"destination-C"}]'
+            ),
+            tool_call_id="call-list-reports",
+            name="list_reports",
+        ),
+    ]
 
 
 def test_build_model_node_binds_tools_and_calls_model_with_history() -> None:
@@ -220,7 +244,10 @@ def test_finalizer_returns_structured_result() -> None:
     update = finalize(
         {
             "job_id": "job-001",
-            "messages": [AIMessage(content="Ready to finalize")],
+            "messages": [
+                *observed_job_and_reports(),
+                AIMessage(content="Ready to finalize"),
+            ],
             "llm_calls": 2,
         }
     )
@@ -249,6 +276,100 @@ def test_mark_tool_limit_records_stop_reason() -> None:
     assert update == {"stop_reason": "tool_limit"}
 
 
+def test_extract_observed_evidence_uses_tool_specific_ids() -> None:
+    messages = [
+        *observed_job_and_reports(),
+        ToolMessage(
+            content='[{"attempt_id":"attempt-C-1"}]',
+            tool_call_id="call-attempts",
+            name="get_delivery_attempts",
+        ),
+        ToolMessage(
+            content='[{"receipt_id":"receipt-B-1"}]',
+            tool_call_id="call-receipts",
+            name="get_recipient_receipts",
+        ),
+        ToolMessage(
+            content=(
+                '{"destination_id":"destination-A",'
+                '"endpoint_url":"https://example.test","enabled":true}'
+            ),
+            tool_call_id="call-config-a",
+            name="get_destination_config",
+        ),
+        ToolMessage(
+            content="null",
+            tool_call_id="call-config-c",
+            name="get_destination_config",
+        ),
+    ]
+
+    observed = extract_observed_evidence(messages)
+
+    assert observed.job_observed is True
+    assert observed.expected_report_ids == frozenset(
+        {"report-A", "report-B", "report-C"}
+    )
+    assert observed.valid_evidence_ids == frozenset(
+        {
+            "report-A",
+            "report-B",
+            "report-C",
+            "attempt-C-1",
+            "receipt-B-1",
+            "destination-A",
+        }
+    )
+    assert "destination-C" not in observed.valid_evidence_ids
+
+
+def test_finalizer_rejects_evidence_not_observed_in_tool_results() -> None:
+    invalid = investigation_result()
+    invalid.findings[0].evidence_ids.append("invented-evidence")
+    model = FakeChatModel(structured_result=invalid)
+    finalize = build_finalizer_node(cast(BaseChatModel, model))
+
+    with pytest.raises(
+        InvestigationValidationError,
+        match="unknown evidence IDs cited",
+    ):
+        finalize(
+            {
+                "job_id": "job-001",
+                "messages": observed_job_and_reports(),
+            }
+        )
+
+
+def test_tool_limit_allows_partial_findings_with_unresolved_questions() -> None:
+    partial = InvestigationResult(
+        job_id="job-001",
+        findings=[
+            Finding(
+                report_id="report-A",
+                conclusion="Investigated",
+                summary="Based on retrieved evidence.",
+                evidence_ids=["report-A"],
+            )
+        ],
+        unresolved_questions=["Reports B and C were not fully inspected."],
+        recommended_actions=[],
+    )
+    model = FakeChatModel(structured_result=partial)
+    finalize = build_finalizer_node(cast(BaseChatModel, model))
+
+    update = finalize(
+        {
+            "job_id": "job-001",
+            "messages": observed_job_and_reports(),
+            "stop_reason": "tool_limit",
+        }
+    )
+
+    assert update["result"] == partial
+    assert update["stop_reason"] == "tool_limit"
+
+
 def test_complete_graph_runs_model_tool_loop_and_finalizer(
     tmp_path,
 ) -> None:
@@ -265,6 +386,12 @@ def test_complete_graph_runs_model_tool_loop_and_finalizer(
                         "name": "get_job",
                         "args": {"job_id": "job-001"},
                         "id": "call-get-job",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "list_reports",
+                        "args": {"job_id": "job-001"},
+                        "id": "call-list-reports",
                         "type": "tool_call",
                     }
                 ],
@@ -288,7 +415,7 @@ def test_complete_graph_runs_model_tool_loop_and_finalizer(
     assert state["result"] == expected
     assert state["stop_reason"] == "complete"
     assert state["llm_calls"] == 3
-    assert state["tool_calls_used"] == 1
+    assert state["tool_calls_used"] == 2
     assert any(
         isinstance(message, ToolMessage)
         and message.name == "get_job"
