@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from langchain.messages import HumanMessage
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -63,6 +63,21 @@ def investigate_with_agent(
     job_id: str,
     model_name: str,
 ) -> InvestigationResult:
+    state = invoke_agent_graph(repository, job_id, model_name)
+
+    result = state.get("result")
+    if not isinstance(result, InvestigationResult):
+        raise RuntimeError(
+            "The investigation graph did not return an InvestigationResult."
+        )
+    return result
+
+
+def invoke_agent_graph(
+    repository: Repository,
+    job_id: str,
+    model_name: str,
+) -> dict[str, Any]:
     model = create_agent_model(model_name)
     graph = build_investigation_graph(model, repository)
     state = graph.invoke(
@@ -76,13 +91,7 @@ def investigate_with_agent(
         },
         config={"recursion_limit": MAX_TOOL_CALLS * 2 + 5},
     )
-
-    result = state.get("result")
-    if not isinstance(result, InvestigationResult):
-        raise RuntimeError(
-            "The investigation graph did not return an InvestigationResult."
-        )
-    return result
+    return dict(state)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
