@@ -24,7 +24,13 @@ from investigator_graph import (
     mark_tool_limit,
     route_after_model,
 )
-from models import Finding, InvestigationResult, RecommendedAction
+from models import (
+    ActionType,
+    DiagnosisCode,
+    Finding,
+    InvestigationResult,
+    RecommendedAction,
+)
 from repository import Repository
 from seed import seed_database
 from validation import InvestigationValidationError
@@ -85,6 +91,7 @@ def investigation_result() -> InvestigationResult:
         findings=[
             Finding(
                 report_id=report_id,
+                diagnosis_code=DiagnosisCode.INSUFFICIENT_EVIDENCE,
                 conclusion="Investigated",
                 summary="Based on retrieved evidence.",
                 evidence_ids=[report_id],
@@ -95,6 +102,7 @@ def investigation_result() -> InvestigationResult:
         recommended_actions=[
             RecommendedAction(
                 report_id="report-C",
+                action_type=ActionType.REPAIR_DESTINATION_CONFIGURATION,
                 action="Repair destination configuration.",
                 rationale="The destination configuration is missing.",
             )
@@ -323,6 +331,64 @@ def test_extract_observed_evidence_uses_tool_specific_ids() -> None:
     assert "destination-C" not in observed.valid_evidence_ids
 
 
+def test_extract_observed_evidence_accepts_normalized_text_blocks() -> None:
+    message = ToolMessage(
+        content=[
+            {
+                "type": "text",
+                "text": '[{"receipt_id":"receipt-B-1"}]',
+            }
+        ],
+        tool_call_id="call-receipts",
+        name="get_recipient_receipts",
+    )
+
+    observed = extract_observed_evidence([message])
+
+    assert observed.valid_evidence_ids == frozenset({"receipt-B-1"})
+
+
+def test_extract_observed_evidence_accepts_structured_record_lists() -> None:
+    message = ToolMessage(
+        content=[
+            {
+                "receipt_id": "receipt-B-1",
+                "report_id": "report-B",
+                "delivery_key": "delivery-job-001-report-B",
+                "receipt_timestamp": "2026-09-28T09:01:01Z",
+            }
+        ],
+        tool_call_id="call-receipts",
+        name="get_recipient_receipts",
+    )
+
+    observed = extract_observed_evidence([message])
+
+    assert observed.valid_evidence_ids == frozenset({"receipt-B-1"})
+
+
+def test_extract_observed_evidence_accepts_non_standard_record_blocks() -> None:
+    message = ToolMessage(
+        content=[
+            {
+                "type": "non_standard",
+                "value": {
+                    "receipt_id": "receipt-B-1",
+                    "report_id": "report-B",
+                    "delivery_key": "delivery-job-001-report-B",
+                    "receipt_timestamp": "2026-09-28T09:01:01Z",
+                },
+            }
+        ],
+        tool_call_id="call-receipts",
+        name="get_recipient_receipts",
+    )
+
+    observed = extract_observed_evidence([message])
+
+    assert observed.valid_evidence_ids == frozenset({"receipt-B-1"})
+
+
 def test_finalizer_rejects_evidence_not_observed_in_tool_results() -> None:
     invalid = investigation_result()
     invalid.findings[0].evidence_ids.append("invented-evidence")
@@ -347,6 +413,7 @@ def test_tool_limit_allows_partial_findings_with_unresolved_questions() -> None:
         findings=[
             Finding(
                 report_id="report-A",
+                diagnosis_code=DiagnosisCode.INSUFFICIENT_EVIDENCE,
                 conclusion="Investigated",
                 summary="Based on retrieved evidence.",
                 evidence_ids=["report-A"],

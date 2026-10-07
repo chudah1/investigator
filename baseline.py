@@ -1,12 +1,13 @@
 from typing import Any
 
+from investigation_policy import DECISION_POLICY
 from models import InvestigationResult, JobEvidence
 from validation import InvestigationValidationError, validate_result
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = f"""
 You investigate failed report deliveries.
 
 Use only the supplied evidence. Do not invent facts or evidence IDs.
@@ -14,6 +15,9 @@ Produce exactly one finding for every expected report.
 Distinguish a sender's recorded status from confirmed recipient delivery.
 When evidence is insufficient or conflicting, state the uncertainty.
 Do not recommend retrying a report when a recipient receipt proves delivery.
+Use the most specific diagnosis_code and action_type allowed by the schema.
+
+{DECISION_POLICY}
 
 Evidence IDs may only be IDs that appear in the supplied evidence as a
 report_id, attempt_id, receipt_id, or destination_config.destination_id.

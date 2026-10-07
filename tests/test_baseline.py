@@ -10,7 +10,14 @@ from baseline import (
 )
 from database import Database
 from evidence import collect_job_evidence
-from models import Finding, InvestigationResult, JobEvidence, RecommendedAction
+from models import (
+    ActionType,
+    DiagnosisCode,
+    Finding,
+    InvestigationResult,
+    JobEvidence,
+    RecommendedAction,
+)
 from repository import Repository
 from seed import seed_database
 
@@ -47,18 +54,25 @@ def valid_result() -> InvestigationResult:
         findings=[
             Finding(
                 report_id="report-A",
+                diagnosis_code=DiagnosisCode.DELIVERED,
                 conclusion="delivered",
                 summary="The attempt succeeded and the recipient recorded a receipt.",
                 evidence_ids=["report-A", "attempt-A-1", "receipt-A-1"],
             ),
             Finding(
                 report_id="report-B",
+                diagnosis_code=(
+                    DiagnosisCode.DELIVERED_WITH_SENDER_STATUS_UNRESOLVED
+                ),
                 conclusion="delivered_with_unresolved_sender_status",
                 summary="The sender timed out, but the recipient recorded a receipt.",
                 evidence_ids=["report-B", "attempt-B-1", "receipt-B-1"],
             ),
             Finding(
                 report_id="report-C",
+                diagnosis_code=(
+                    DiagnosisCode.DESTINATION_CONFIGURATION_MISSING
+                ),
                 conclusion="configuration_repair_required",
                 summary="The attempt failed because destination configuration was absent.",
                 evidence_ids=["report-C", "attempt-C-1"],
@@ -68,11 +82,13 @@ def valid_result() -> InvestigationResult:
         recommended_actions=[
             RecommendedAction(
                 report_id="report-B",
+                action_type=ActionType.RECONCILE_SENDER_STATUS,
                 action="reconcile_sender_status",
                 rationale="The receipt proves delivery, so retrying risks duplication.",
             ),
             RecommendedAction(
                 report_id="report-C",
+                action_type=ActionType.REPAIR_DESTINATION_CONFIGURATION,
                 action="repair_destination_configuration",
                 rationale="No destination configuration is available.",
             ),

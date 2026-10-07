@@ -15,6 +15,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
+from investigation_policy import DECISION_POLICY
 from investigation_tools import build_tools
 from models import InvestigationResult
 from repository import Repository
@@ -56,7 +57,7 @@ When you have enough evidence to diagnose every expected report, stop calling
 tools and briefly state that the investigation is ready to be finalized.
 """.strip()
 
-FINALIZER_PROMPT = """
+FINALIZER_PROMPT = f"""
 Produce the final investigation result using only evidence returned by tools.
 
 Return exactly one finding for every expected report.
@@ -65,6 +66,9 @@ A recipient receipt proves that the report was accepted.
 Do not cite evidence IDs that do not appear in tool results.
 Do not recommend retrying a report when a receipt proves delivery.
 Explicitly identify uncertainty when evidence is missing or incomplete.
+Use the most specific diagnosis_code and action_type allowed by the schema.
+
+{DECISION_POLICY}
 """.strip()
 
 
@@ -250,17 +254,43 @@ def extract_observed_evidence(
 
 
 def _parse_tool_message(message: ToolMessage) -> Any:
-    if not isinstance(message.content, str):
-        raise RuntimeError(
-            f"Tool {message.name!r} returned unsupported content."
-        )
+    content = message.text
+    if content:
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                f"Tool {message.name!r} returned invalid JSON."
+            ) from error
 
-    try:
-        return json.loads(message.content)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(
-            f"Tool {message.name!r} returned invalid JSON."
-        ) from error
+    raw_content = message.content
+    if isinstance(raw_content, list):
+        if all(
+            isinstance(item, dict) and "type" not in item
+            for item in raw_content
+        ):
+            values = raw_content
+        elif all(
+            isinstance(item, dict)
+            and item.get("type") == "non_standard"
+            and "value" in item
+            for item in raw_content
+        ):
+            values = [item["value"] for item in raw_content]
+            if len(values) == 1 and isinstance(values[0], list):
+                return values[0]
+        else:
+            values = None
+
+        if values is not None:
+            if message.name in {"get_job", "get_destination_config"}:
+                if len(values) == 1:
+                    return values[0]
+            return values
+
+    raise RuntimeError(
+        f"Tool {message.name!r} returned unsupported content."
+    )
 
 
 def _require_mapping(
