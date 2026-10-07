@@ -7,6 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from baseline import DEFAULT_MODEL, create_openai_client, investigate_with_openai
 from database import Database
+from environment import load_environment
 from evidence import collect_job_evidence
 from investigator_graph import MAX_TOOL_CALLS, build_investigation_graph
 from models import InvestigationResult
@@ -55,7 +56,7 @@ def create_agent_model(model_name: str) -> BaseChatModel:
             "Run: pip install -r requirements.txt"
         ) from error
 
-    return ChatOpenAI(model=model_name, temperature=0)
+    return ChatOpenAI(model=model_name)
 
 
 def investigate_with_agent(
@@ -95,6 +96,7 @@ def invoke_agent_graph(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    load_environment()
     args = parse_args(argv)
 
     database = Database(str(args.db))

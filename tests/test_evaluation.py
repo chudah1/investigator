@@ -1,6 +1,6 @@
 import json
 
-from eval_cases import JOB_001
+from eval_cases import CASES_BY_JOB_ID, JOB_001, JOB_002, JOB_003
 from eval_cli import main
 from evaluation import evaluate_result
 from investigation_policy import DECISION_POLICY
@@ -99,12 +99,79 @@ def flawed_agent_result() -> InvestigationResult:
     )
 
 
+def correct_job_002_result() -> InvestigationResult:
+    return InvestigationResult(
+        job_id="job-002",
+        findings=[
+            Finding(
+                report_id="report-D",
+                diagnosis_code=DiagnosisCode.DELIVERY_FAILED,
+                conclusion="Delivery failed",
+                summary="The HTTP 503 attempt failed without a receipt.",
+                evidence_ids=["attempt-D-1"],
+            ),
+            Finding(
+                report_id="report-E",
+                diagnosis_code=DiagnosisCode.INSUFFICIENT_EVIDENCE,
+                conclusion="Delivery outcome is unknown",
+                summary=(
+                    "The queued report and enabled destination do not show "
+                    "whether a delivery attempt occurred."
+                ),
+                evidence_ids=["report-E", "destination-E"],
+            ),
+        ],
+        unresolved_questions=["Was report-E ever attempted?"],
+        recommended_actions=[
+            RecommendedAction(
+                report_id="report-D",
+                action_type=ActionType.RETRY_DELIVERY,
+                action="Retry report-D.",
+                rationale="The transient HTTP 503 attempt failed.",
+            ),
+            RecommendedAction(
+                report_id="report-E",
+                action_type=ActionType.INVESTIGATE,
+                action="Investigate report-E delivery activity.",
+                rationale="No delivery attempt or receipt is recorded.",
+            ),
+        ],
+    )
+
+
 def test_correct_result_passes_job_001_eval() -> None:
     report = evaluate_result(correct_result(), JOB_001)
 
     assert report.passed is True
     assert report.score == 1.0
     assert report.issues == []
+
+
+def test_holdout_cases_are_registered() -> None:
+    assert CASES_BY_JOB_ID == {
+        "job-001": JOB_001,
+        "job-002": JOB_002,
+        "job-003": JOB_003,
+    }
+
+
+def test_correct_result_passes_job_002_holdout() -> None:
+    report = evaluate_result(correct_job_002_result(), JOB_002)
+
+    assert report.passed is True
+    assert report.score == 1.0
+
+
+def test_job_002_holdout_requires_an_unresolved_question() -> None:
+    result = correct_job_002_result()
+    result.unresolved_questions = []
+
+    report = evaluate_result(result, JOB_002)
+
+    assert any(
+        issue.check == "unresolved_questions"
+        for issue in report.issues
+    )
 
 
 def test_baseline_and_agent_share_the_same_decision_policy() -> None:

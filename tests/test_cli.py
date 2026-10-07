@@ -1,3 +1,5 @@
+import sys
+from types import SimpleNamespace
 from typing import Any
 
 import cli
@@ -30,6 +32,26 @@ class FakeGraph:
         self.input = graph_input
         self.config = config
         return {"result": self.result}
+
+
+def test_create_agent_model_does_not_force_unsupported_parameters(
+    monkeypatch,
+) -> None:
+    received: dict[str, Any] = {}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            received.update(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "langchain_openai",
+        SimpleNamespace(ChatOpenAI=FakeChatOpenAI),
+    )
+
+    cli.create_agent_model("test-model")
+
+    assert received == {"model": "test-model"}
 
 
 def test_investigate_with_agent_invokes_graph_with_job(
@@ -115,10 +137,16 @@ def test_cli_returns_before_model_call_for_unknown_job(
 ) -> None:
     db_path = tmp_path / "investigator.db"
     Database(str(db_path)).initialize()
+    environment_loaded = False
+
+    def fake_load_environment() -> None:
+        nonlocal environment_loaded
+        environment_loaded = True
 
     def unexpected_call(*_args: Any, **_kwargs: Any) -> InvestigationResult:
         raise AssertionError("The model must not be called for an unknown job.")
 
+    monkeypatch.setattr(cli, "load_environment", fake_load_environment)
     monkeypatch.setattr(cli, "investigate_with_agent", unexpected_call)
 
     exit_code = cli.main(
@@ -126,4 +154,5 @@ def test_cli_returns_before_model_call_for_unknown_job(
     )
 
     assert exit_code == 1
+    assert environment_loaded is True
     assert capsys.readouterr().out.strip() == "Job not found: missing-job"

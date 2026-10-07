@@ -9,6 +9,7 @@ from langchain_core.callbacks import get_usage_metadata_callback
 from baseline import DEFAULT_MODEL, create_openai_client, investigate_with_openai
 from cli import DEFAULT_DB_PATH, invoke_agent_graph
 from database import Database
+from environment import load_environment
 from eval_cases import CASES_BY_JOB_ID
 from evidence import collect_job_evidence
 from experiment import (
@@ -202,6 +203,7 @@ def _positive_integer(value: str) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    load_environment()
     args = parse_args(argv)
     case = CASES_BY_JOB_ID.get(args.job_id)
     if case is None:

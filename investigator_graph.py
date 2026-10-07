@@ -323,9 +323,32 @@ def _ids_from_records(
 
 
 def mark_tool_limit(
-    _state: InvestigationState,
+    state: InvestigationState,
 ) -> dict[str, Any]:
-    return {"stop_reason": "tool_limit"}
+    last_message = state["messages"][-1] if state["messages"] else None
+    if not isinstance(last_message, AIMessage):
+        return {"stop_reason": "tool_limit"}
+
+    skipped_calls = [
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "error": (
+                        "Tool call was not executed because the investigation "
+                        "tool-call limit was reached."
+                    )
+                }
+            ),
+            tool_call_id=tool_call["id"],
+            name=tool_call["name"],
+            status="error",
+        )
+        for tool_call in last_message.tool_calls
+    ]
+    return {
+        "messages": skipped_calls,
+        "stop_reason": "tool_limit",
+    }
 
 
 def build_investigation_graph(

@@ -21,6 +21,7 @@ class EvaluationCase:
     case_id: str
     job_id: str
     reports: tuple[ReportExpectation, ...]
+    minimum_unresolved_questions: int = 0
 
 
 class EvaluationIssue(BaseModel):
@@ -81,6 +82,16 @@ def evaluate_result(
         "unexpected_findings",
         f"Unexpected findings: {unexpected_report_ids}.",
     )
+
+    if case.minimum_unresolved_questions:
+        check(
+            len(result.unresolved_questions)
+            >= case.minimum_unresolved_questions,
+            "unresolved_questions",
+            "Expected at least "
+            f"{case.minimum_unresolved_questions} unresolved question(s), "
+            f"got {len(result.unresolved_questions)}.",
+        )
 
     actions_by_report = {
         report_id: [

@@ -4,6 +4,9 @@ from database import Database
 
 
 DEFAULT_DB_PATH = Path(__file__).with_name("investigator.db")
+SCALE_REPORT_IDS = tuple(
+    f"report-scale-{number:02d}" for number in range(1, 7)
+)
 
 
 def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
@@ -13,13 +16,13 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
 
     try:
         with connection:
-            connection.execute(
+            connection.executemany(
                 """
                 INSERT INTO jobs (job_id)
                 VALUES (?)
                 ON CONFLICT (job_id) DO NOTHING
                 """,
-                ("job-001",),
+                [("job-001",), ("job-002",), ("job-003",)],
             )
 
             connection.executemany(
@@ -32,6 +35,12 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                     ("job-001", "report-A"),
                     ("job-001", "report-B"),
                     ("job-001", "report-C"),
+                    ("job-002", "report-D"),
+                    ("job-002", "report-E"),
+                    *[
+                        ("job-003", report_id)
+                        for report_id in SCALE_REPORT_IDS
+                    ],
                 ],
             )
 
@@ -53,6 +62,17 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                     ("report-A", "job-001", "destination-A", "succeeded"),
                     ("report-B", "job-001", "destination-B", "timed_out"),
                     ("report-C", "job-001", "destination-C", "failed"),
+                    ("report-D", "job-002", "destination-D", "failed"),
+                    ("report-E", "job-002", "destination-E", "queued"),
+                    *[
+                        (
+                            report_id,
+                            "job-003",
+                            "destination-scale",
+                            "succeeded",
+                        )
+                        for report_id in SCALE_REPORT_IDS
+                    ],
                 ],
             )
 
@@ -94,6 +114,26 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                         "failed",
                         "Destination configuration not found",
                     ),
+                    (
+                        "attempt-D-1",
+                        "report-D",
+                        "2026-09-28T10:00:00+00:00",
+                        "failed",
+                        "HTTP 503 Service Unavailable",
+                    ),
+                    *[
+                        (
+                            f"attempt-{report_id.removeprefix('report-')}",
+                            report_id,
+                            f"2026-09-28T11:{number:02d}:00+00:00",
+                            "succeeded",
+                            None,
+                        )
+                        for number, report_id in enumerate(
+                            SCALE_REPORT_IDS,
+                            start=1,
+                        )
+                    ],
                 ],
             )
 
@@ -124,6 +164,18 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                         "delivery-job-001-report-B",
                         "2026-09-28T09:01:01+00:00",
                     ),
+                    *[
+                        (
+                            f"receipt-{report_id.removeprefix('report-')}",
+                            report_id,
+                            f"delivery-job-003-{report_id}",
+                            f"2026-09-28T11:{number:02d}:01+00:00",
+                        )
+                        for number, report_id in enumerate(
+                            SCALE_REPORT_IDS,
+                            start=1,
+                        )
+                    ],
                 ],
             )
 
@@ -142,6 +194,13 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                 [
                     ("destination-A", "https://recipient.example/reports", 1),
                     ("destination-B", "https://recipient.example/reports", 1),
+                    ("destination-D", "https://recipient.example/reports", 1),
+                    ("destination-E", "https://recipient.example/reports", 1),
+                    (
+                        "destination-scale",
+                        "https://recipient.example/reports",
+                        1,
+                    ),
                 ],
             )
     finally:

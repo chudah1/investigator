@@ -284,6 +284,29 @@ def test_mark_tool_limit_records_stop_reason() -> None:
     assert update == {"stop_reason": "tool_limit"}
 
 
+def test_mark_tool_limit_closes_each_skipped_tool_call() -> None:
+    request = _model_response_with_tool_calls(2)
+
+    update = mark_tool_limit(
+        {
+            "job_id": "job-001",
+            "messages": [request],
+        }
+    )
+
+    assert update["stop_reason"] == "tool_limit"
+    messages = update["messages"]
+    assert len(messages) == 2
+    assert all(
+        isinstance(message, ToolMessage)
+        and message.status == "error"
+        for message in messages
+    )
+    assert {
+        message.tool_call_id for message in messages
+    } == {"call-0", "call-1"}
+
+
 def test_extract_observed_evidence_uses_tool_specific_ids() -> None:
     messages = [
         *observed_job_and_reports(),

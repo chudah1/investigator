@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import experiment_cli
 from experiment_cli import (
     TrackedResponses,
     _langchain_usage,
@@ -59,3 +60,28 @@ def test_experiment_cli_defaults_to_one_paid_run_per_mode() -> None:
 def test_experiment_cli_rejects_zero_runs() -> None:
     with pytest.raises(SystemExit):
         parse_args(["--runs", "0"])
+
+
+def test_experiment_cli_loads_environment_before_validation(
+    monkeypatch,
+    capsys,
+) -> None:
+    environment_loaded = False
+
+    def fake_load_environment() -> None:
+        nonlocal environment_loaded
+        environment_loaded = True
+
+    monkeypatch.setattr(
+        experiment_cli,
+        "load_environment",
+        fake_load_environment,
+    )
+
+    exit_code = experiment_cli.main(["missing-job"])
+
+    assert exit_code == 2
+    assert environment_loaded is True
+    assert capsys.readouterr().out.strip() == (
+        "No evaluation case for job: missing-job"
+    )

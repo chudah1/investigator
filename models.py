@@ -106,7 +106,10 @@ class InvestigationResult(BaseModel):
         description="Exactly one finding for every expected report."
     )
     unresolved_questions: list[str] = Field(
-        description="Questions that cannot be answered from the supplied evidence."
+        description=(
+            "Questions that cannot be answered from the supplied evidence. "
+            "Identify the affected report ID in each question."
+        )
     )
     recommended_actions: list[RecommendedAction] = Field(
         description=(
