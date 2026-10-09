@@ -109,6 +109,6 @@ def test_get_destination_config_distinguishes_present_from_missing(
 
     assert configured is not None
     assert configured.destination_id == "destination-A"
-    assert configured.endpoint_url == "https://recipient.example/reports"
+    assert configured.endpoint_url == "https://recipient.example/deliveries"
     assert configured.enabled is True
     assert repository.get_destination_config("destination-C") is None

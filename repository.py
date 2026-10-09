@@ -1,3 +1,7 @@
+import sqlite3
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from database import Database
 from models import (
     DeliveryAttempt,
@@ -69,6 +73,24 @@ class Repository:
             connection.close()
         return reports
 
+    def get_report(self, report_id: str) -> Report | None:
+        connection = self.database.get_connection()
+
+        try:
+            row = connection.execute(
+                """
+                SELECT report_id, job_id, destination_id, delivery_status
+                FROM reports
+                WHERE report_id = ?
+                """,
+                (report_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return Report.model_validate(dict(row))
+        finally:
+            connection.close()
+
     def get_delivery_attempts(self, report_id: str) -> list[DeliveryAttempt]:
         connection = self.database.get_connection()
 
@@ -87,6 +109,46 @@ class Repository:
         finally:
             connection.close()
 
+    def create_delivery_attempt(
+        self,
+        report_id: str,
+        outcome: str,
+        error: str | None = None,
+    ) -> DeliveryAttempt:
+        attempt = DeliveryAttempt(
+            attempt_id=f"attempt-{uuid4().hex}",
+            report_id=report_id,
+            timestamp=datetime.now(timezone.utc),
+            outcome=outcome,
+            error=error,
+        )
+        connection = self.database.get_connection()
+
+        try:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO delivery_attempts (
+                        attempt_id,
+                        report_id,
+                        timestamp,
+                        outcome,
+                        error
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        attempt.attempt_id,
+                        attempt.report_id,
+                        attempt.timestamp.isoformat(),
+                        attempt.outcome,
+                        attempt.error,
+                    ),
+                )
+            return attempt
+        finally:
+            connection.close()
+
     def get_recipient_receipts(self, report_id: str) -> list[RecipientReceipt]:
         connection = self.database.get_connection()
 
@@ -102,6 +164,63 @@ class Repository:
             ).fetchall()
 
             return [RecipientReceipt.model_validate(dict(row)) for row in rows]
+        finally:
+            connection.close()
+
+    def create_recipient_receipt(
+        self,
+        report_id: str,
+        delivery_key: str,
+    ) -> RecipientReceipt:
+        receipt = RecipientReceipt(
+            receipt_id=f"receipt-{uuid4().hex}",
+            report_id=report_id,
+            delivery_key=delivery_key,
+            receipt_timestamp=datetime.now(timezone.utc),
+        )
+        connection = self.database.get_connection()
+
+        try:
+            try:
+                with connection:
+                    connection.execute(
+                        """
+                        INSERT INTO recipient_receipts (
+                            receipt_id,
+                            report_id,
+                            delivery_key,
+                            receipt_timestamp
+                        )
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            receipt.receipt_id,
+                            receipt.report_id,
+                            receipt.delivery_key,
+                            receipt.receipt_timestamp.isoformat(),
+                        ),
+                    )
+                return receipt
+            except sqlite3.IntegrityError:
+                row = connection.execute(
+                    """
+                    SELECT receipt_id, report_id, delivery_key,
+                           receipt_timestamp
+                    FROM recipient_receipts
+                    WHERE delivery_key = ?
+                    """,
+                    (delivery_key,),
+                ).fetchone()
+                if row is None:
+                    raise
+
+                existing = RecipientReceipt.model_validate(dict(row))
+                if existing.report_id != report_id:
+                    raise ValueError(
+                        f"Delivery key {delivery_key!r} already belongs to "
+                        f"report {existing.report_id!r}."
+                    )
+                return existing
         finally:
             connection.close()
 

@@ -192,13 +192,29 @@ def seed_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                     enabled = excluded.enabled
                 """,
                 [
-                    ("destination-A", "https://recipient.example/reports", 1),
-                    ("destination-B", "https://recipient.example/reports", 1),
-                    ("destination-D", "https://recipient.example/reports", 1),
-                    ("destination-E", "https://recipient.example/reports", 1),
+                    (
+                        "destination-A",
+                        "https://recipient.example/deliveries",
+                        1,
+                    ),
+                    (
+                        "destination-B",
+                        "https://recipient.example/deliveries",
+                        1,
+                    ),
+                    (
+                        "destination-D",
+                        "https://recipient.example/deliveries",
+                        1,
+                    ),
+                    (
+                        "destination-E",
+                        "https://recipient.example/deliveries",
+                        1,
+                    ),
                     (
                         "destination-scale",
-                        "https://recipient.example/reports",
+                        "https://recipient.example/deliveries",
                         1,
                     ),
                 ],
